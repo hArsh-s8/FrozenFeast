@@ -13,6 +13,8 @@ import Products from "./pages/Products";
 import LoginCard from "./Components/LoginCard";
 import SignUpCard from "./Components/SignUpCard";
 import Cart from "./pages/Cart";
+import Checkout from "./pages/Checkout";
+import OrderConfirmation from "./pages/OrderConfirmation";
 import ProfilePage from "./Components/ProfilePage";
 import Footer from "./Components/Footer";
 
@@ -22,7 +24,7 @@ function App() {
   const location = useLocation();
 
   const totalItems = cartItems.reduce((sum, item) => sum + (item.quantity || 1), 0);
-  const isCartPage = location.pathname === '/cart';
+  const isCartPage = location.pathname === '/cart' || location.pathname === '/checkout' || location.pathname.startsWith('/order-confirmation');
 
   return (
     <div className="App">
@@ -38,6 +40,8 @@ function App() {
             <Route path="/login" element={<LoginCard />} />
             <Route path="/signup" element={<SignUpCard />} />
             <Route path="/cart" element={<Cart addedProducts={cartItems} setCartItems={setCartItems} />} />
+            <Route path="/checkout" element={<Checkout cartItems={cartItems} setCartItems={setCartItems} />} />
+            <Route path="/order-confirmation/:orderId" element={<OrderConfirmation />} />
             <Route path="/profile" element={<ProfilePage />} />
           </Routes>
         </main>

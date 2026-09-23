@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import './Cart.css';
 import CartCard from "../Components/CartCard";
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 
 import { API_VERSION_URL } from "../config";
@@ -16,9 +16,8 @@ const Cart = ({ addedProducts = [], setCartItems }) => {
     const [loadingAddresses, setLoadingAddresses] = useState(true);
     const [addressError, setAddressError] = useState(null);
     const [orderHistory, setOrderHistory] = useState([]);
-    const [checkingOut, setCheckingOut] = useState(false);
-    const [checkoutSuccess, setCheckoutSuccess] = useState(false);
 
+    const navigate = useNavigate();
     const token = localStorage.getItem('token');
 
     // Fetch saved addresses
@@ -109,52 +108,17 @@ const Cart = ({ addedProducts = [], setCartItems }) => {
         setCartItems(updatedCart);
     };
 
-    const handleCheckout = async () => {
+    const handleProceedToCheckout = () => {
         if (!token) {
-            alert("Please log in to place an order.");
-            return;
-        }
-        if (!selectedAddress) {
-            alert("Please select a delivery address.");
+            alert("Please log in to proceed to checkout.");
+            navigate('/login');
             return;
         }
         if (cartProducts.length === 0) {
             alert("Your cart is empty.");
             return;
         }
-
-        setCheckingOut(true);
-        try {
-            const response = await fetch(`${BASE_URL}/orders`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                    items: cartProducts,
-                    total: totalAmount,
-                    addressId: selectedAddress
-                })
-            });
-
-            const data = await response.json();
-
-            if (data.success) {
-                setOrderHistory(data.recentOrders || []);
-                setCartProductsLocal([]);
-                setCartItems([]);
-                setCheckoutSuccess(true);
-                setTimeout(() => setCheckoutSuccess(false), 4000);
-            } else {
-                alert(data.message || "Failed to place order. Please try again.");
-            }
-        } catch (error) {
-            console.error("Checkout error:", error);
-            alert("Network error. Please check your connection.");
-        } finally {
-            setCheckingOut(false);
-        }
+        navigate('/checkout');
     };
 
     const renderOrderHistory = () => {
@@ -212,18 +176,6 @@ const Cart = ({ addedProducts = [], setCartItems }) => {
     if (addedProducts.length === 0) {
         return (
             <div className="cart-page flex-col">
-                <AnimatePresence>
-                    {checkoutSuccess && (
-                        <motion.div
-                            className="checkout-success-banner"
-                            initial={{ opacity: 0, y: -30 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -30 }}
-                        >
-                            🎉 Order placed successfully! Your delicious treats are on the way.
-                        </motion.div>
-                    )}
-                </AnimatePresence>
                 <div className="cart-empty">
                     <h2>Your cart is empty</h2>
                     <NavLink to="/products" className="shop-now-btn">
@@ -237,19 +189,6 @@ const Cart = ({ addedProducts = [], setCartItems }) => {
 
     return (
         <div className="cart-page flex-col">
-            <AnimatePresence>
-                {checkoutSuccess && (
-                    <motion.div
-                        className="checkout-success-banner"
-                        initial={{ opacity: 0, y: -30 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -30 }}
-                    >
-                        🎉 Order placed successfully! Your delicious treats are on the way.
-                    </motion.div>
-                )}
-            </AnimatePresence>
-
             <div className="cart-content">
                 <div className="cart-items-section">
                     {cartProducts.map((product) => (
@@ -312,10 +251,10 @@ const Cart = ({ addedProducts = [], setCartItems }) => {
 
                     <button
                         className="checkout-btn"
-                        onClick={handleCheckout}
-                        disabled={checkingOut || loadingAddresses || !selectedAddress || cartProducts.length === 0}
+                        onClick={handleProceedToCheckout}
+                        disabled={cartProducts.length === 0}
                     >
-                        {checkingOut ? "Placing Order..." : `Place Order (₹${totalAmount.toFixed(2)})`}
+                        Proceed to Checkout (₹{totalAmount.toFixed(2)}) →
                     </button>
                 </div>
             </div>

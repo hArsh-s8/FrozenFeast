@@ -1,0 +1,125 @@
+.payment-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(8, 8, 14, 0.85);
+    backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    padding: 20px;
+}
+
+.payment-modal-card {
+    background: #151522;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    padding: 32px 28px;
+    max-width: 440px;
+    width: 100%;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 30px rgba(244, 67, 54, 0.15);
+    color: #f0f0f5;
+    font-family: 'Inter', sans-serif;
+}
+
+.modal-icon-wrap {
+    width: 68px;
+    height: 68px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 20px;
+    font-size: 28px;
+}
+
+.failure-icon {
+    background: rgba(244, 67, 54, 0.15);
+    color: #ff5252;
+    border: 2px solid rgba(244, 67, 54, 0.3);
+}
+
+.modal-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 10px;
+    font-family: 'Outfit', sans-serif;
+}
+
+.modal-subtitle {
+    font-size: 0.95rem;
+    line-height: 1.5;
+    color: #a0a0b5;
+    margin-bottom: 20px;
+}
+
+.cart-safe-badge {
+    display: inline-block;
+    background: rgba(224, 64, 251, 0.1);
+    border: 1px solid rgba(224, 64, 251, 0.25);
+    padding: 8px 16px;
+    border-radius: 30px;
+    font-size: 0.85rem;
+    color: #e040fb;
+    font-weight: 500;
+    margin-bottom: 26px;
+}
+
+.modal-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.btn-retry {
+    width: 100%;
+    padding: 13px 20px;
+    background: linear-gradient(135deg, #e040fb, #ff4081);
+    color: white;
+    font-weight: 600;
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-size: 0.95rem;
+    transition: all 0.25s ease;
+}
+
+.btn-retry:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(224, 64, 251, 0.4);
+}
+
+.btn-back-cart {
+    width: 100%;
+    padding: 12px 20px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #d0d0dd;
+    font-weight: 500;
+    border-radius: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-size: 0.95rem;
+    transition: all 0.25s ease;
+}
+
+.btn-back-cart:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+}
+
+.btn-icon {
+    font-size: 0.85rem;
+}

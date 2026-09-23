@@ -17,6 +17,15 @@ const {
     updateRecentOrders
 } = require("../controller/Auth");
 
+// Payment controllers
+const {
+    getRazorpayKey,
+    createRazorpayOrder,
+    verifyPayment,
+    createCodOrder,
+    getOrderById
+} = require("../controller/payment");
+
 // Middleware
 const { auth, isAdmin } = require("../middleware/auth");
 
@@ -38,7 +47,14 @@ router.put("/favorites", auth, updateFavorites);
 // ─── Orders Routes (protected) ───────────────────────────────────────────────
 router.post("/orders", auth, addOrder);          // Add a new order
 router.get("/orders", auth, getOrders);           // Get all orders
+router.get("/orders/:orderId", auth, getOrderById); // Get single order details
 router.put("/recentOrders", auth, updateRecentOrders); // Legacy full-replace
+
+// ─── Payment Routes (protected) ──────────────────────────────────────────────
+router.get("/payment/key", auth, getRazorpayKey);
+router.post("/payment/create-order", auth, createRazorpayOrder);
+router.post("/payment/verify", auth, verifyPayment);
+router.post("/payment/cod", auth, createCodOrder);
 
 // ─── Admin-Only Routes ────────────────────────────────────────────────────────
 router.post("/imageUpload", auth, isAdmin, imageUpload);

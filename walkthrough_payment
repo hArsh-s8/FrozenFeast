@@ -1,0 +1,94 @@
+# Walkthrough: Complete Checkout & Payment Flow Implementation
+
+We have upgraded the ordering journey in **FrozenFeast** from `Cart → Place Order` to a complete, secure, four-step flow:
+
+```text
+Cart ➔ Checkout ➔ Payment (Razorpay Test Mode / COD) ➔ Order Confirmation
+```
+
+All existing features (cart persistence, quantity updates, DineIn, Catering, saved delivery addresses, profile orders history) remain fully intact and backward-compatible.
+
+---
+
+## 1. Summary of Changes
+
+### Backend Changes
+
+| File | Change Type | Purpose |
+|------|-------------|---------|
+| [`Backend/models/Order.js`](file:///d:/Codes/PROJECTS/project1/Backend/models/Order.js) | **NEW** | Dedicated Mongoose model storing `orderId`, `userId`, `items`, `subtotal`, `deliveryFee`, `tax`, `total`, `deliveryAddress` snapshot, `paymentMethod`, `paymentStatus`, `paymentId`, `razorpayOrderId`, `razorpaySignature`, and `orderStatus`. |
+| [`Backend/controller/payment.js`](file:///d:/Codes/PROJECTS/project1/Backend/controller/payment.js) | **NEW** | Implements `getRazorpayKey`, `createRazorpayOrder` (validates cart totals on server & creates Razorpay order), `verifyPayment` (HMAC-SHA256 signature verification), `createCodOrder` (COD order placement), and `getOrderById`. Also syncs to `user.recentOrders` for backward compatibility. |
+| [`Backend/routes/user.js`](file:///d:/Codes/PROJECTS/project1/Backend/routes/user.js) | **MODIFIED** | Mounted payment routes with `auth` middleware: `GET /api/v1/payment/key`, `POST /api/v1/payment/create-order`, `POST /api/v1/payment/verify`, `POST /api/v1/payment/cod`, `GET /api/v1/orders/:orderId`. |
+| [`Backend/.env`](file:///d:/Codes/PROJECTS/project1/Backend/.env) | **MODIFIED** | Added `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` configuration. |
+| [`Backend/package.json`](file:///d:/Codes/PROJECTS/project1/Backend/package.json) | **MODIFIED** | Installed `razorpay` (`^2.9.6`). |
+
+### Frontend Changes
+
+| File | Change Type | Purpose |
+|------|-------------|---------|
+| [`Frontend/src/pages/Cart.jsx`](file:///d:/Codes/PROJECTS/project1/Frontend/src/pages/Cart.jsx) | **MODIFIED** | Updated the action button from immediate order placement to **"Proceed to Checkout (₹XXX) →"**, seamlessly navigating to `/checkout` while preserving existing cart items and quantities. |
+| [`Frontend/src/pages/Checkout.jsx`](file:///d:/Codes/PROJECTS/project1/Frontend/src/pages/Checkout.jsx) | **NEW** | Checkout page with progress stepper (`Cart → Checkout → Payment → Confirmation`), saved address selector, order items review, payment method selector (`Online Payment` vs `Cash on Delivery`), and bill breakdown (Subtotal, Delivery Fee, Taxes, Total). Integrates with Razorpay test modal. |
+| [`Frontend/src/pages/Checkout.css`](file:///d:/Codes/PROJECTS/project1/Frontend/src/pages/Checkout.css) | **NEW** | Dark glassmorphism styles matching FrozenFeast design tokens with glowing cards and responsive layout. |
+| [`Frontend/src/Components/PaymentFailureModal.jsx`](file:///d:/Codes/PROJECTS/project1/Frontend/src/Components/PaymentFailureModal.jsx) & [`.css`](file:///d:/Codes/PROJECTS/project1/Frontend/src/Components/PaymentFailureModal.css) | **NEW** | Modal handling payment failure or user cancellation (`ondismiss`). Displays helpful message with **[Try Again]** and **[Back to Cart]** buttons without losing cart items. |
+| [`Frontend/src/Components/DummyPaymentModal.jsx`](file:///d:/Codes/PROJECTS/project1/Frontend/src/Components/DummyPaymentModal.jsx) & [`.css`](file:///d:/Codes/PROJECTS/project1/Frontend/src/Components/DummyPaymentModal.css) | **NEW** | Test sandbox simulator fallback allowing instant card and UPI testing when Razorpay test keys are not yet provided. |
+| [`Frontend/src/pages/OrderConfirmation.jsx`](file:///d:/Codes/PROJECTS/project1/Frontend/src/pages/OrderConfirmation.jsx) & [`.css`](file:///d:/Codes/PROJECTS/project1/Frontend/src/pages/OrderConfirmation.css) | **NEW** | Celebratory confirmation screen featuring confetti banner, Order ID, 4-step live delivery tracker, item receipt, payment status badge (`Paid` / `Pending`), and recipient details. |
+| [`Frontend/src/App.js`](file:///d:/Codes/PROJECTS/project1/Frontend/src/App.js) | **MODIFIED** | Registered `/checkout` and `/order-confirmation/:orderId` routes. Suppresses floating cart button during checkout and confirmation. |
+| [`Frontend/src/config.js`](file:///d:/Codes/PROJECTS/project1/Frontend/src/config.js) | **MODIFIED** | Intelligently routes API calls to `http://localhost:4000` during local browser sessions (`localhost` / `127.0.0.1`), falling back to Render for production deployments. |
+
+---
+
+## 2. Security & Verification Highlights
+
+1. **Secret Key Isolation**:
+   - `RAZORPAY_KEY_SECRET` resides strictly in `Backend/.env` and is never exposed to the client.
+   - Frontend only receives the public `keyId` from `create-order` or `/payment/key`.
+2. **Cryptographic Payment Signature Verification**:
+   - Backend calculates `crypto.createHmac("sha256", secret).update(order_id + "|" + payment_id).digest("hex")`.
+   - If signature does not match `razorpay_signature`, the request is rejected with `400 Bad Request`.
+3. **Server-Side Price Calculation**:
+   - Backend recalculates items subtotal, delivery fee (Free over ₹300, else ₹40), and 5% GST on the server to prevent client-side price manipulation.
+4. **Cart Preservation on Failure**:
+   - If the user cancels the Razorpay modal or payment is declined, the cart is never cleared. The user is prompted with `[Try Again]` or `[Back to Cart]`.
+
+---
+
+## 3. Automated Verification Results
+
+All automated backend and API tests passed with 100% success:
+
+```text
+=== RUNNING PAYMENT & CHECKOUT VERIFICATION TESTS ===
+[TEST 1] GET /payment/key response: { success: true, keyId: null, isConfigured: false }
+  => Test 1 PASSED: Key endpoint responded cleanly
+
+[TEST 2] POST /payment/create-order response: {
+  success: true,
+  isDummy: true,
+  orderId: 'dummy_1790188392102',
+  amount: 44100,
+  subtotal: 420,
+  deliveryFee: 0,
+  tax: 21,
+  total: 441
+}
+  => Test 2 PASSED: Server correctly validated items & calculated total (150*2 + 120 + 0 + 21 = 441)
+
+[TEST 3] POST /payment/verify with forged signature: {
+  success: false,
+  message: 'Payment verification failed: Invalid signature'
+}
+  => Test 3 PASSED: Server rejected forged signature securely!
+
+[TEST 4] POST /payment/verify (simulator mode) response: Payment verified and order confirmed successfully FF-MUEFY3SF-8047
+  => Test 4 PASSED: Simulator payment verified & order created with paymentStatus='paid'
+
+[TEST 5] POST /payment/cod response: Order placed successfully with Cash on Delivery FF-MUEFY3WA-9900
+  => Test 5 PASSED: COD order created with paymentMethod='cod' and paymentStatus='pending'
+
+[TEST 6] GET /orders/:orderId response: FF-MUEFY3SF-8047 441
+  => Test 6 PASSED: Order confirmation lookup succeeded
+=== ALL PAYMENT TESTS COMPLETED ===
+```
+
+Frontend production build check:
+- `$env:CI="false"; npx react-scripts build` compiled with **exit code 0** and zero build errors.
