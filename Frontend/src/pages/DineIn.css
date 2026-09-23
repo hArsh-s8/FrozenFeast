@@ -115,16 +115,39 @@
     box-shadow: 0 4px 15px rgba(224, 64, 251, 0.4);
 }
 
-/* ── Shops Grid ───────────────────────────── */
-.shops-container {
-    padding: 0 40px;
+/* ── Main Content Layout (Cards + Map side-by-side) ─────── */
+.dinein-content {
+    display: flex;
+    align-items: flex-start;
+    gap: 30px;
+    padding: 0 40px 60px;
     max-width: 1400px;
     margin: 0 auto;
 }
 
+/* ── Shops Column ─────────────────────────────────────────── */
+.shops-container {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 0;
+    max-width: none;
+    margin: 0;
+}
+
+/* ── Map Column ───────────────────────────────────────────── */
+.dinein-map-panel {
+    width: 420px;
+    flex-shrink: 0;
+    position: sticky;
+    top: 80px; /* sits below the navbar */
+    max-height: calc(100vh - 100px);
+    overflow: visible;
+}
+
+/* ── Shops Grid ───────────────────────────────────────────── */
 .shops-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
     gap: 30px;
     justify-items: center;
 }
@@ -179,9 +202,24 @@
     .dinein-hero h1 {
         font-size: 2.2rem;
     }
-    .shops-container {
-        padding: 0 20px;
+
+    /* Stack cards above map on mobile */
+    .dinein-content {
+        flex-direction: column;
+        padding: 0 20px 60px;
+        gap: 24px;
     }
+
+    .shops-container {
+        width: 100%;
+    }
+
+    .dinein-map-panel {
+        width: 100%;
+        position: static; /* remove sticky on mobile */
+        max-height: none;
+    }
+
     .shops-grid {
         grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
         gap: 20px;

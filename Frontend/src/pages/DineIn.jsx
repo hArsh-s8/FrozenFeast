@@ -1,14 +1,17 @@
 import React, { useEffect, useState } from "react";
 import ShopCard from "../Components/ShopCard";
+import ShopLocationMap from "../Components/ShopLocationMap";
 import './DineIn.css';
 import { motion, AnimatePresence } from 'framer-motion';
 import { API_VERSION_URL } from '../config';
+import { getShopCoordinates } from '../data/shopCoordinates';
 
 const DineIn = () => {
     const [dineinList, setDineinList] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [location, setLocation] = useState('');
+    const [selectedShop, setSelectedShop] = useState(null);
 
     useEffect(() => {
         const fetchDinein = async () => {
@@ -40,13 +43,20 @@ const DineIn = () => {
         fetchDinein();
     }, []);
 
+    /**
+     * Enriches a shop object with coordinates from the frontend lookup,
+     * then sets it as the selected shop to show on the map.
+     */
     const handleSelectShop = (shop) => {
-        console.log('Selected shop:', shop.shopName); 
+        const coords = getShopCoordinates(shop.shopName);
+        const enrichedShop = { ...shop, ...coords };
+        console.log('Selected shop:', enrichedShop.shopName, `(${enrichedShop.latitude}, ${enrichedShop.longitude})`);
+        setSelectedShop(enrichedShop);
     };
 
     const handleSearch = (e) => {
         e.preventDefault();
-        console.log('Searching for shops near:', location); 
+        console.log('Searching for shops near:', location);
     };
 
     const filteredDineinList = dineinList.filter(shop =>
@@ -83,6 +93,7 @@ const DineIn = () => {
 
     return (
         <div className="dinein-container">
+            {/* ── Hero & Search ─────────────────────────────────────────── */}
             <motion.div 
                 className="dinein-hero"
                 initial={{ opacity: 0, y: -20 }}
@@ -111,44 +122,59 @@ const DineIn = () => {
                 </form>
             </motion.div>
 
-            <div className="shops-container">
-                <motion.div 
-                    className="shops-grid"
-                    layout
-                >
-                    <AnimatePresence>
-                        {filteredDineinList.length === 0 ? (
-                            <motion.div 
-                                className="empty-shops"
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                exit={{ opacity: 0 }}
-                            >
-                                <span className="empty-icon">📍</span>
-                                <p>We couldn't find any parlors matching your search. Try another location.</p>
-                            </motion.div>
-                        ) : (
-                            filteredDineinList.map((shop, index) => (
-                                <motion.div
-                                    key={shop._id || shop.id || index}
-                                    layout
-                                    initial={{ opacity: 0, scale: 0.9 }}
-                                    animate={{ opacity: 1, scale: 1 }}
-                                    exit={{ opacity: 0, scale: 0.9 }}
-                                    transition={{ duration: 0.3, delay: index * 0.05 }}
+            {/* ── Main Content: Cards + Map ─────────────────────────────── */}
+            <div className="dinein-content">
+                {/* ── Shop Cards ──────────────────────────────────────── */}
+                <div className="shops-container">
+                    <motion.div 
+                        className="shops-grid"
+                        layout
+                    >
+                        <AnimatePresence>
+                            {filteredDineinList.length === 0 ? (
+                                <motion.div 
+                                    className="empty-shops"
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
                                 >
-                                    <ShopCard
-                                        shopName={shop.shopName}
-                                        shopImageUrl={shop.shopImageUrl}
-                                        location={shop.location}
-                                        rating={shop.rating || 0}
-                                        onSelectShop={() => handleSelectShop(shop)}
-                                    />
+                                    <span className="empty-icon">📍</span>
+                                    <p>We couldn't find any parlors matching your search. Try another location.</p>
                                 </motion.div>
-                            ))
-                        )}
-                    </AnimatePresence>
-                </motion.div>
+                            ) : (
+                                filteredDineinList.map((shop, index) => (
+                                    <motion.div
+                                        key={shop._id || shop.id || index}
+                                        layout
+                                        initial={{ opacity: 0, scale: 0.9 }}
+                                        animate={{ opacity: 1, scale: 1 }}
+                                        exit={{ opacity: 0, scale: 0.9 }}
+                                        transition={{ duration: 0.3, delay: index * 0.05 }}
+                                    >
+                                        <ShopCard
+                                            shopName={shop.shopName}
+                                            shopImageUrl={shop.shopImageUrl}
+                                            location={shop.location}
+                                            rating={shop.rating || 0}
+                                            onSelectShop={() => handleSelectShop(shop)}
+                                            isSelected={
+                                                selectedShop &&
+                                                (selectedShop._id
+                                                    ? selectedShop._id === shop._id
+                                                    : selectedShop.shopName === shop.shopName)
+                                            }
+                                        />
+                                    </motion.div>
+                                ))
+                            )}
+                        </AnimatePresence>
+                    </motion.div>
+                </div>
+
+                {/* ── Map Panel ────────────────────────────────────────── */}
+                <div className="dinein-map-panel">
+                    <ShopLocationMap shop={selectedShop} />
+                </div>
             </div>
         </div>
     );

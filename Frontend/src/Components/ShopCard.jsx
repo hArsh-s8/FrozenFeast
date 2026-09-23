@@ -1,7 +1,7 @@
 import React from 'react';
 import './ShopCard.css';
 
-const ShopCard = ({ shopName, shopImageUrl, location, rating, onSelectShop }) => {
+const ShopCard = ({ shopName, shopImageUrl, location, rating, onSelectShop, isSelected }) => {
   // Generate star icons based on rating (1-5 scale)
   const renderStars = (rating) => {
     const fullStars = Math.floor(rating);
@@ -18,7 +18,14 @@ const ShopCard = ({ shopName, shopImageUrl, location, rating, onSelectShop }) =>
   };
 
   return (
-    <div className="shop-container" onClick={onSelectShop} role="button" tabIndex={0}>
+    <div
+      className={`shop-container${isSelected ? ' shop-container--selected' : ''}`}
+      onClick={onSelectShop}
+      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onSelectShop?.()}
+      role="button"
+      tabIndex={0}
+      aria-pressed={isSelected}
+    >
       <div className="shop-image-wrapper">
         <img 
           className="shop-img" 
