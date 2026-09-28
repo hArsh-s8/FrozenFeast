@@ -13,10 +13,12 @@ import './Checkout.css';
 import { API_VERSION_URL } from '../config';
 import PaymentFailureModal from '../Components/PaymentFailureModal';
 import DummyPaymentModal from '../Components/DummyPaymentModal';
+import { useAuth } from '../context/AuthContext';
 
 const BASE_URL = API_VERSION_URL;
 
 // Helper to load Razorpay Checkout script dynamically
+
 const loadRazorpayScript = () => {
     return new Promise((resolve) => {
         if (window.Razorpay) {
@@ -32,8 +34,8 @@ const loadRazorpayScript = () => {
 };
 
 const Checkout = ({ cartItems = [], setCartItems }) => {
+    const { user } = useAuth();
     const navigate = useNavigate();
-    const token = localStorage.getItem('token');
 
     // Addresses
     const [addressList, setAddressList] = useState([]);
@@ -60,20 +62,18 @@ const Checkout = ({ cartItems = [], setCartItems }) => {
 
     // Check user authentication
     useEffect(() => {
-        if (!token) {
+        if (!user) {
             navigate('/login');
         }
-    }, [token, navigate]);
+    }, [user, navigate]);
 
     // Fetch saved addresses
     const fetchAddresses = useCallback(async () => {
-        if (!token) return;
+        if (!user) return;
         try {
             setLoadingAddresses(true);
             const response = await fetch(`${BASE_URL}/deliveries`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
+                credentials: 'include'
             });
             const data = await response.json();
             if (data.success && data.deliveries) {
@@ -87,7 +87,7 @@ const Checkout = ({ cartItems = [], setCartItems }) => {
         } finally {
             setLoadingAddresses(false);
         }
-    }, [token, selectedAddress]);
+    }, [user, selectedAddress]);
 
     useEffect(() => {
         fetchAddresses();
@@ -122,8 +122,8 @@ const Checkout = ({ cartItems = [], setCartItems }) => {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
                 },
+                credentials: 'include',
                 body: JSON.stringify({
                     razorpay_order_id: paymentResponse.razorpay_order_id,
                     razorpay_payment_id: paymentResponse.razorpay_payment_id,
@@ -172,8 +172,8 @@ const Checkout = ({ cartItems = [], setCartItems }) => {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
                 },
+                credentials: 'include',
                 body: JSON.stringify({
                     items: cartItems,
                     addressId: selectedAddress,
@@ -262,8 +262,8 @@ const Checkout = ({ cartItems = [], setCartItems }) => {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
                 },
+                credentials: 'include',
                 body: JSON.stringify({
                     items: cartItems,
                     addressId: selectedAddress,

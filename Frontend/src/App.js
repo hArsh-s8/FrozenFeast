@@ -16,7 +16,11 @@ import Cart from "./pages/Cart";
 import Checkout from "./pages/Checkout";
 import OrderConfirmation from "./pages/OrderConfirmation";
 import ProfilePage from "./Components/ProfilePage";
+import AddProduct from "./Components/AddProducts";
 import Footer from "./Components/Footer";
+import { AuthProvider } from "./context/AuthContext";
+import ProtectedRoute from "./Components/ProtectedRoute";
+import AdminRoute from "./Components/AdminRoute";
 
 function App() {
   const [cartItems, setCartItems] = useState([]);
@@ -24,25 +28,57 @@ function App() {
   const location = useLocation();
 
   const totalItems = cartItems.reduce((sum, item) => sum + (item.quantity || 1), 0);
-  const isCartPage = location.pathname === '/cart' || location.pathname === '/checkout' || location.pathname.startsWith('/order-confirmation');
+  const nonCartShoppingRoutes = ['/', '/products', '/delivery', '/dinein', '/catering', '/profile'];
+  const showFloatingCart = nonCartShoppingRoutes.includes(location.pathname);
 
   return (
-    <div className="App">
+    <AuthProvider>
+      <div className="App">
       <div className="app-layout">
         <Navbar />
         <main className="app-main">
           <Routes>
+            {/* Public Routes */}
             <Route path="/" element={<Home />} />
             <Route path="/products" element={<Products cartItems={cartItems} setCartItems={setCartItems} />} />
-            <Route path="/delivery" element={<Delivery />} />
             <Route path="/dinein" element={<DineIn />} />
             <Route path="/catering" element={<Catering />} />
             <Route path="/login" element={<LoginCard />} />
             <Route path="/signup" element={<SignUpCard />} />
-            <Route path="/cart" element={<Cart addedProducts={cartItems} setCartItems={setCartItems} />} />
-            <Route path="/checkout" element={<Checkout cartItems={cartItems} setCartItems={setCartItems} />} />
-            <Route path="/order-confirmation/:orderId" element={<OrderConfirmation />} />
-            <Route path="/profile" element={<ProfilePage />} />
+
+            {/* Protected Authenticated User Routes */}
+            <Route path="/delivery" element={
+              <ProtectedRoute>
+                <Delivery />
+              </ProtectedRoute>
+            } />
+            <Route path="/cart" element={
+              <ProtectedRoute>
+                <Cart addedProducts={cartItems} setCartItems={setCartItems} />
+              </ProtectedRoute>
+            } />
+            <Route path="/checkout" element={
+              <ProtectedRoute>
+                <Checkout cartItems={cartItems} setCartItems={setCartItems} />
+              </ProtectedRoute>
+            } />
+            <Route path="/order-confirmation/:orderId" element={
+              <ProtectedRoute>
+                <OrderConfirmation />
+              </ProtectedRoute>
+            } />
+            <Route path="/profile" element={
+              <ProtectedRoute>
+                <ProfilePage />
+              </ProtectedRoute>
+            } />
+
+            {/* Admin Only Routes */}
+            <Route path="/add-product" element={
+              <AdminRoute>
+                <AddProduct />
+              </AdminRoute>
+            } />
           </Routes>
         </main>
         <Footer />
@@ -50,7 +86,7 @@ function App() {
 
       {/* Floating Cart Button */}
       <AnimatePresence>
-        {!isCartPage && (
+        {showFloatingCart && (
           <motion.button
             className="floating-cart"
             onClick={() => navigate('/cart')}
@@ -79,7 +115,9 @@ function App() {
         )}
       </AnimatePresence>
     </div>
+    </AuthProvider>
   );
 }
 
 export default App;
+

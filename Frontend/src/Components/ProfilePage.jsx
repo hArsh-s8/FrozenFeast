@@ -6,9 +6,12 @@ import './ProfilePage.css';
 
 import { API_VERSION_URL } from "../config";
 
+import { useAuth } from '../context/AuthContext';
+
 const BASE_URL = API_VERSION_URL;
 
 const ProfilePage = () => {
+    const { logout } = useAuth();
     const [user, setUser] = useState(null);
     const [addresses, setAddresses] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -20,7 +23,6 @@ const ProfilePage = () => {
     const [activeTab, setActiveTab] = useState('info'); // 'info' | 'favorites' | 'orders' | 'addresses'
     const [savingProfile, setSavingProfile] = useState(false);
 
-    const token = localStorage.getItem('token');
     const navigate = useNavigate();
 
     const fetchAll = useCallback(async () => {
@@ -28,21 +30,16 @@ const ProfilePage = () => {
             setLoading(true);
             setError(null);
 
-            if (!token) {
-                navigate('/login');
-                return;
-            }
-
             // Fetch profile (includes favorites + recentOrders)
             const [profileRes, addressRes, ordersRes] = await Promise.allSettled([
                 fetch(`${BASE_URL}/user/profile`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
+                    credentials: 'include'
                 }),
                 fetch(`${BASE_URL}/deliveries`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
+                    credentials: 'include'
                 }),
                 fetch(`${BASE_URL}/orders`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
+                    credentials: 'include'
                 })
             ]);
 
@@ -51,7 +48,6 @@ const ProfilePage = () => {
                 const userData = await profileRes.value.json();
                 if (!profileRes.value.ok) {
                     if (profileRes.value.status === 401) {
-                        localStorage.removeItem('token');
                         navigate('/login');
                         return;
                     }
@@ -82,7 +78,7 @@ const ProfilePage = () => {
         } finally {
             setLoading(false);
         }
-    }, [token, navigate]);
+    }, [navigate]);
 
     useEffect(() => {
         fetchAll();
@@ -95,8 +91,8 @@ const ProfilePage = () => {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`,
                 },
+                credentials: 'include',
                 body: JSON.stringify(editForm),
             });
 
@@ -122,8 +118,8 @@ const ProfilePage = () => {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`,
                 },
+                credentials: 'include',
                 body: JSON.stringify({ favorites: newFavs })
             });
         } catch (e) {
@@ -136,7 +132,7 @@ const ProfilePage = () => {
         try {
             const res = await fetch(`${BASE_URL}/delivery/${id}`, {
                 method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${token}` }
+                credentials: 'include'
             });
             const data = await res.json();
             if (data.success) {
@@ -149,9 +145,8 @@ const ProfilePage = () => {
         }
     };
 
-    const handleLogout = () => {
-        localStorage.removeItem('token');
-        localStorage.removeItem('role');
+    const handleLogout = async () => {
+        await logout();
         navigate('/');
     };
 

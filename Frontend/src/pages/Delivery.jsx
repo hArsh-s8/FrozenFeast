@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom"; 
 import { motion, AnimatePresence } from "framer-motion";
-import { FaUserAlt, FaPhoneAlt, FaMapMarkerAlt, FaCity, FaMapPin, FaCheckCircle, FaExclamationCircle, FaRegCreditCard, FaTruck } from "react-icons/fa";
+import { FaUserAlt, FaPhoneAlt, FaMapMarkerAlt, FaCity, FaMapPin, FaCheckCircle, FaExclamationCircle, FaTruck } from "react-icons/fa";
 import './Delivery.css';
 import { API_VERSION_URL } from '../config';
 
+import { useAuth } from '../context/AuthContext';
+
 const Delivery = () => {
+    const { user } = useAuth();
     const [deliveryData, setDeliveryData] = useState({
         name: "", contact: "", streetAdd: "", city: "", pin: "", district: ""
     });
@@ -13,9 +15,7 @@ const Delivery = () => {
     const [loading, setLoading] = useState(false); 
     const [showPopup, setShowPopup] = useState(false);
     const [popupMessage, setPopupMessage] = useState(""); 
-    const [isError, setIsError] = useState(false);
-
-    const navigate = useNavigate(); 
+    const [isError, setIsError] = useState(false); 
 
     function changeHandler(event) {
         const { name, value } = event.target;
@@ -34,8 +34,7 @@ const Delivery = () => {
 
         setLoading(true);
         try {
-            const token = localStorage.getItem('token');
-            if (!token) {
+            if (!user) {
                 throw new Error("Please log in to submit delivery details.");
             }
 
@@ -43,8 +42,8 @@ const Delivery = () => {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`, 
                 },
+                credentials: 'include',
                 body: JSON.stringify(deliveryData),
             });
 

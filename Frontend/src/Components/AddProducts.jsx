@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import iceCreamIcon from '../assets/logo.png';
 import './AddProducts.css';
-import { Link } from "react-router-dom";
 import { API_VERSION_URL } from '../config';
 
+import { useAuth } from '../context/AuthContext';
+
 const AddProduct = () => {
+    const { user } = useAuth();
     const [productData, setProductData] = useState({
         iceName: "",
         description: "",
@@ -39,8 +39,7 @@ const AddProduct = () => {
 
         setLoading(true);
         try {
-            const token = localStorage.getItem('token');
-            if (!token) {
+            if (!user) {
                 throw new Error("Please log in as admin to add products.");
             }
 
@@ -53,9 +52,7 @@ const AddProduct = () => {
 
             const response = await fetch(`${API_VERSION_URL}/imageUpload`, {
                 method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                },
+                credentials: 'include',
                 body: formData,
             });
 
