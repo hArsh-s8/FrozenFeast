@@ -16,7 +16,7 @@ const allowedOrigins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
-    "https://frozenfeast.onrender.com"
+    "https://frozenfeast.versal.app"
 ].filter(Boolean);
 
 app.use(cors({
