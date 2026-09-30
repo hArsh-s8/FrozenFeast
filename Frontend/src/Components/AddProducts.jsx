@@ -1,7 +1,7 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import './AddProducts.css';
 import { API_VERSION_URL } from '../config';
-
+import { useNavigate } from "react-router-dom";
 import { useAuth } from '../context/AuthContext';
 
 const AddProduct = () => {
@@ -10,7 +10,7 @@ const AddProduct = () => {
         iceName: "",
         description: "",
         tags: "",
-        price:""
+        price: ""
     });
     const [imageFile, setImageFile] = useState(null);
     const [loading, setLoading] = useState(false);
