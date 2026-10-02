@@ -23,7 +23,7 @@ exports.auth = (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded; // Decoded token (lightweight, no DB fetch)
+    req.user = decoded; // Decoded token (lightweight, no DB fetch) 123
 
     next();
   } catch (error) {
