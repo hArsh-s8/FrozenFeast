@@ -11,24 +11,43 @@ require("dotenv").config();
 const PORT = process.env.PORT || 4000;
 
 // ─── Middleware ───────────────────────────────────────────────────
-const allowedOrigins = [
+const rawAllowedOrigins = [
     process.env.FRONTEND_URL,
+    "https://frozenfeast.vercel.app",
+    "https://frozenfeast.onrender.com",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
-    "https://frozenfeast.versal.app"
-].filter(Boolean);
+    "http://127.0.0.1:5173"
+];
+
+const allowedOrigins = rawAllowedOrigins
+    .filter(Boolean)
+    .map(origin => origin.trim().replace(/\/+$/, ""));
 
 app.use(cors({
     origin: (origin, callback) => {
-        // Allow requests with no origin (like curl, Postman, server-to-server)
-        if (!origin || allowedOrigins.includes(origin)) {
-            callback(null, origin || true);
-        } else {
-            callback(new Error("CORS policy violation: Origin not allowed"));
+        // Allow requests with no origin (like mobile apps, curl, Postman, server-to-server)
+        if (!origin) {
+            return callback(null, true);
         }
+
+        const normalizedOrigin = origin.trim().replace(/\/+$/, "");
+
+        const isAllowed =
+            allowedOrigins.includes(normalizedOrigin) ||
+            normalizedOrigin.endsWith(".vercel.app");
+
+        if (isAllowed) {
+            return callback(null, true);
+        }
+
+        console.warn(`[CORS Blocked] Origin not allowed: ${origin}`);
+        return callback(new Error("CORS policy violation: Origin not allowed"));
     },
-    credentials: true
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"]
 }));
 
 app.use(express.json({ limit: "10mb" }));

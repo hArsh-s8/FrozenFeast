@@ -55,6 +55,12 @@ const errorHandler = (err, req, res, next) => {
         message = "File size exceeds limit (5MB max)";
     }
 
+    // 6. CORS Policy Error
+    else if (err.message && err.message.includes("CORS policy violation")) {
+        statusCode = 403;
+        message = err.message;
+    }
+
     // Sanitize 500 internal server errors so internal details/stack traces are never exposed
     if (statusCode === 500 && process.env.NODE_ENV === "production") {
         message = "An unexpected error occurred on the server";

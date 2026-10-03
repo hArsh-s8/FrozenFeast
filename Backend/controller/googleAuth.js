@@ -24,10 +24,11 @@ exports.googleAuthInit = (req, res) => {
         const state = crypto.randomBytes(16).toString("hex");
 
         // Store state in HTTP-only short-lived cookie (10 minutes)
+        const isProduction = process.env.NODE_ENV === "production";
         res.cookie("oauth_state", state, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            sameSite: "lax",
+            secure: isProduction,
+            sameSite: isProduction ? "none" : "lax",
             maxAge: 10 * 60 * 1000
         });
 
@@ -59,10 +60,11 @@ exports.googleAuthCallback = async (req, res) => {
         const storedState = req.cookies.oauth_state;
 
         // Clear state cookie
+        const isProduction = process.env.NODE_ENV === "production";
         res.clearCookie("oauth_state", {
             httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            sameSite: "lax"
+            secure: isProduction,
+            sameSite: isProduction ? "none" : "lax"
         });
 
         if (error) {
@@ -142,8 +144,8 @@ exports.googleAuthCallback = async (req, res) => {
         // Store JWT in HTTP-only cookie
         res.cookie("token", token, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            sameSite: "lax",
+            secure: isProduction,
+            sameSite: isProduction ? "none" : "lax",
             maxAge: 24 * 60 * 60 * 1000
         });
 
