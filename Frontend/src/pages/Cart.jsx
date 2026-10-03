@@ -6,9 +6,12 @@ import { motion, AnimatePresence } from "framer-motion";
 
 import { API_VERSION_URL } from "../config";
 
+import { useAuth } from "../context/AuthContext";
+
 const BASE_URL = API_VERSION_URL;
 
 const Cart = ({ addedProducts = [], setCartItems }) => {
+    const { user } = useAuth();
     const [cartProducts, setCartProductsLocal] = useState([]);
     const [totalAmount, setTotalAmount] = useState(0);
     const [addressList, setAddressList] = useState([]);
@@ -18,14 +21,13 @@ const Cart = ({ addedProducts = [], setCartItems }) => {
     const [orderHistory, setOrderHistory] = useState([]);
 
     const navigate = useNavigate();
-    const token = localStorage.getItem('token');
 
     // Fetch saved addresses
     const fetchAddress = useCallback(async () => {
         try {
             setLoadingAddresses(true);
             setAddressError(null);
-            if (!token) {
+            if (!user) {
                 setAddressError("Please log in to view your saved addresses.");
                 return;
             }
@@ -34,8 +36,8 @@ const Cart = ({ addedProducts = [], setCartItems }) => {
                 method: "GET",
                 headers: {
                     "Content-Type": "application/json",
-                    "Authorization": `Bearer ${token}`
-                }
+                },
+                credentials: "include"
             });
 
             const responseData = await response.json();
@@ -54,14 +56,14 @@ const Cart = ({ addedProducts = [], setCartItems }) => {
         } finally {
             setLoadingAddresses(false);
         }
-    }, [token]);
+    }, [user]);
 
     // Fetch order history from database
     const fetchOrderHistory = useCallback(async () => {
-        if (!token) return;
+        if (!user) return;
         try {
             const res = await fetch(`${BASE_URL}/orders`, {
-                headers: { 'Authorization': `Bearer ${token}` }
+                credentials: "include"
             });
             const data = await res.json();
             if (data.success) {
@@ -70,7 +72,7 @@ const Cart = ({ addedProducts = [], setCartItems }) => {
         } catch (e) {
             console.error("Error fetching orders:", e);
         }
-    }, [token]);
+    }, [user]);
 
     useEffect(() => {
         fetchAddress();
@@ -109,7 +111,7 @@ const Cart = ({ addedProducts = [], setCartItems }) => {
     };
 
     const handleProceedToCheckout = () => {
-        if (!token) {
+        if (!user) {
             alert("Please log in to proceed to checkout.");
             navigate('/login');
             return;

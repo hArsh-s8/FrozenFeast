@@ -1,7 +1,7 @@
 import React from 'react';
 import './ShopCard.css';
 
-const ShopCard = ({ shopName, shopImageUrl, location, rating, onSelectShop, isSelected }) => {
+const ShopCard = ({ shopName, shopImageUrl, location, rating, distanceKm, onSelectShop, isSelected }) => {
   // Generate star icons based on rating (1-5 scale)
   const renderStars = (rating) => {
     const fullStars = Math.floor(rating);
@@ -11,7 +11,7 @@ const ShopCard = ({ shopName, shopImageUrl, location, rating, onSelectShop, isSe
     return (
       <>
         {[...Array(fullStars)].map((_, i) => <span key={`full-${i}`} className="star full">★</span>)}
-        {hasHalfStar && <span className="star half">☆</span>} {/* Approximate half-star */}
+        {hasHalfStar && <span className="star half">☆</span>}
         {[...Array(emptyStars)].map((_, i) => <span key={`empty-${i}`} className="star empty">☆</span>)}
       </>
     );
@@ -31,12 +31,15 @@ const ShopCard = ({ shopName, shopImageUrl, location, rating, onSelectShop, isSe
           className="shop-img" 
           src={shopImageUrl} 
           alt={`${shopName} location image`}
-          loading="lazy" // Lazy load for performance
+          loading="lazy"
         />
       </div>
       <div className="shop-info">
         <h2 className="shop-name">{shopName}</h2>
-        <p className="shop-location">{location}</p>
+        <p className="shop-location">
+          {location}
+          {distanceKm != null && <span className="shop-distance" style={{ color: '#e040fb', marginLeft: '6px', fontWeight: 'bold' }}>• {distanceKm} km</span>}
+        </p>
         <div className="shop-rating" aria-label={`Rating: ${rating} out of 5 stars`}>
           {renderStars(rating)}
           <span className="rating-text">({rating}/5)</span>

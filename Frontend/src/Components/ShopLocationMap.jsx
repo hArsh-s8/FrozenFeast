@@ -4,8 +4,6 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './ShopLocationMap.css';
 
-// Fix Leaflet's default marker icon path issue with webpack/CRA
-// (leaflet ships marker icons as separate files; webpack changes their paths)
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
@@ -17,7 +15,7 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadow,
 });
 
-// Custom purple marker to match FrozenFeast branding
+// Custom purple marker for shop locations
 const purpleIcon = new L.Icon({
   iconUrl:
     'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-violet.png',
@@ -28,87 +26,95 @@ const purpleIcon = new L.Icon({
   shadowSize: [41, 41],
 });
 
-// ── Inner helper: flies the map to new coords whenever `shop` changes ────────
-// Must be rendered inside <MapContainer> to access the map instance via useMap()
+// Custom red marker for searched customer location
+const customerIcon = new L.Icon({
+  iconUrl:
+    'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+  shadowUrl: markerShadow,
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41],
+});
+
 function MapFlyTo({ lat, lng }) {
   const map = useMap();
 
   useEffect(() => {
-    if (lat != null && lng != null) {
-      map.flyTo([lat, lng], 15, { duration: 1.2 });
+    if (lat != null && lng != null && !isNaN(lat) && !isNaN(lng)) {
+      map.flyTo([lat, lng], 13, { duration: 1.2 });
     }
   }, [lat, lng, map]);
 
   return null;
 }
 
-// ── Main exported component ───────────────────────────────────────────────────
 /**
  * ShopLocationMap
  *
  * Props:
- *   shop — the currently selected shop object (null means show placeholder).
- *          Expected shape: { shopName, location, latitude, longitude }
- *
- * Behaviour:
- *   - First render: creates the map centered on the shop.
- *   - Subsequent renders with a different shop: reuses the same map instance
- *     and calls flyTo() to smoothly animate to the new location.
- *   - Never mounts more than one MapContainer.
+ *   shop — selected shop object { shopName, location, latitude, longitude, distanceKm, hasCoordinates }
+ *   customerLocation — optional geocoded customer search location { latitude, longitude, displayName }
  */
-const ShopLocationMap = ({ shop }) => {
-  // We keep a stable initial center so MapContainer never re-mounts.
-  // All dynamic recentering is handled by <MapFlyTo />.
+const ShopLocationMap = ({ shop, customerLocation }) => {
+  const targetLat = customerLocation?.latitude ?? shop?.latitude ?? null;
+  const targetLng = customerLocation?.longitude ?? shop?.longitude ?? null;
+
   const initialCenter = useRef(
-    shop
-      ? [shop.latitude, shop.longitude]
-      : [18.5204, 73.8567] // Pune fallback
+    targetLat != null && targetLng != null ? [targetLat, targetLng] : null
   );
 
-  if (!shop) {
+  if (targetLat == null || targetLng == null) {
     return (
       <div className="shop-map-panel">
         <div className="shop-map-placeholder">
           <span className="shop-map-placeholder-icon">🗺️</span>
-          <p>Select a shop card to see its location on the map.</p>
+          <p>
+            {shop && shop.hasCoordinates === false
+              ? "Location coordinates are unavailable for this parlor."
+              : "Search a city/address or select a parlor to see its location on the map."}
+          </p>
         </div>
       </div>
     );
   }
 
-  const { shopName, location, latitude, longitude, isFallback } = shop;
-
-  const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
+  const directionsUrl = shop?.latitude != null && shop?.longitude != null
+    ? `https://www.google.com/maps/dir/?api=1&destination=${shop.latitude},${shop.longitude}`
+    : null;
 
   return (
     <div className="shop-map-panel">
       {/* ── Header ──────────────────────────────────────────────── */}
       <div className="shop-map-header">
         <div className="shop-map-header-info">
-          <span className="shop-map-label">📍 Shop Location</span>
-          <h3 className="shop-map-title">{shopName}</h3>
-          <p className="shop-map-address">{location}</p>
+          <span className="shop-map-label">📍 {customerLocation ? "Nearby Parlors Map" : "Shop Location"}</span>
+          <h3 className="shop-map-title">{shop?.shopName || customerLocation?.displayName || "Parlor Locations"}</h3>
+          <p className="shop-map-address">
+            {shop?.location || customerLocation?.displayName}
+            {shop?.distanceKm != null && ` • ${shop.distanceKm} km away`}
+          </p>
         </div>
-        <a
-          href={directionsUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="shop-map-directions-btn"
-          aria-label={`Get directions to ${shopName}`}
-          id={`directions-btn-${shopName?.replace(/\s+/g, '-').toLowerCase()}`}
-        >
-          🧭 Get Directions
-        </a>
+        {directionsUrl && (
+          <a
+            href={directionsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shop-map-directions-btn"
+            aria-label={`Get directions to ${shop?.shopName || 'shop'}`}
+          >
+            🧭 Get Directions
+          </a>
+        )}
       </div>
 
-      {/* ── Map ─────────────────────────────────────────────────── */}
+      {/* ── Leaflet Map Container ───────────────────────────────── */}
       <div className="shop-map-leaflet-wrapper">
         <MapContainer
-          center={initialCenter.current}
-          zoom={15}
+          center={initialCenter.current || [targetLat, targetLng]}
+          zoom={13}
           scrollWheelZoom={true}
           style={{ height: '100%', width: '100%' }}
-          // Prevent re-mount when shop changes — flyTo handles recentering
           key="frozen-feast-shop-map"
         >
           <TileLayer
@@ -116,25 +122,30 @@ const ShopLocationMap = ({ shop }) => {
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          {/* Smoothly fly to the new shop location */}
-          <MapFlyTo lat={latitude} lng={longitude} />
+          <MapFlyTo lat={targetLat} lng={targetLng} />
 
-          {/* Shop marker */}
-          <Marker position={[latitude, longitude]} icon={purpleIcon}>
-            <Popup>
-              <p className="map-popup-name">{shopName}</p>
-              <p className="map-popup-address">{location}</p>
-            </Popup>
-          </Marker>
+          {/* Searched Customer Location Marker */}
+          {customerLocation?.latitude != null && customerLocation?.longitude != null && (
+            <Marker position={[customerLocation.latitude, customerLocation.longitude]} icon={customerIcon}>
+              <Popup>
+                <p className="map-popup-name">📍 Your Searched Location</p>
+                <p className="map-popup-address">{customerLocation.displayName}</p>
+              </Popup>
+            </Marker>
+          )}
+
+          {/* Selected Shop Marker */}
+          {shop?.latitude != null && shop?.longitude != null && shop?.hasCoordinates !== false && (
+            <Marker position={[shop.latitude, shop.longitude]} icon={purpleIcon}>
+              <Popup>
+                <p className="map-popup-name">{shop.shopName}</p>
+                <p className="map-popup-address">{shop.location}</p>
+                {shop.distanceKm != null && <p className="map-popup-distance">📏 {shop.distanceKm} km away</p>}
+              </Popup>
+            </Marker>
+          )}
         </MapContainer>
       </div>
-
-      {/* Fallback notice when coordinates are approximated */}
-      {isFallback && (
-        <div className="shop-map-fallback-banner">
-          ⚠️ Exact coordinates unavailable — showing approximate location.
-        </div>
-      )}
     </div>
   );
 };

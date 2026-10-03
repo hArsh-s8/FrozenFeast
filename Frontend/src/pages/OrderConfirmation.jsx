@@ -16,7 +16,6 @@ import { API_VERSION_URL } from '../config';
 const OrderConfirmation = () => {
     const { orderId } = useParams();
     const location = useLocation();
-    const token = localStorage.getItem('token');
 
     // Use state passed from checkout or fetch from backend
     const [order, setOrder] = useState(location.state?.order || null);
@@ -27,17 +26,9 @@ const OrderConfirmation = () => {
         if (order) return;
 
         const fetchOrder = async () => {
-            if (!token) {
-                setError('Please log in to view order confirmation.');
-                setLoading(false);
-                return;
-            }
-
             try {
                 const res = await fetch(`${API_VERSION_URL}/orders/${orderId}`, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
+                    credentials: 'include'
                 });
                 const data = await res.json();
                 if (data.success && data.order) {
@@ -54,7 +45,7 @@ const OrderConfirmation = () => {
         };
 
         fetchOrder();
-    }, [orderId, order, token]);
+    }, [orderId, order]);
 
     if (loading) {
         return (

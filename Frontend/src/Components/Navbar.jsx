@@ -2,11 +2,14 @@ import logo from '../assets/logo.png';
 import { IoPerson } from "react-icons/io5";
 import { FaShoppingCart, FaBars, FaTimes } from "react-icons/fa";
 import './Navbar.css';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth } from '../context/AuthContext';
 
 function Navbar() {
+    const { user } = useAuth();
+    const location = useLocation();
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [scrolled, setScrolled] = useState(false);
 
@@ -23,6 +26,19 @@ function Navbar() {
         { path: '/dinein', label: 'Dine-In' },
         { path: '/catering', label: 'Catering' },
     ];
+
+    const shoppingRoutes = [
+        '/',
+        '/products',
+        '/delivery',
+        '/dinein',
+        '/catering',
+        '/cart',
+        '/checkout',
+        '/profile'
+    ];
+
+    const showCart = shoppingRoutes.includes(location.pathname) || location.pathname.startsWith('/order-confirmation');
 
     return (
         <header className={`navbar-header ${scrolled ? 'navbar-header--scrolled' : ''}`}>
@@ -44,10 +60,18 @@ function Navbar() {
                             {link.label}
                         </NavLink>
                     ))}
+                    {user && user.role === 'Admin' && (
+                        <NavLink
+                            to="/add-product"
+                            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+                        >
+                            + Add Product
+                        </NavLink>
+                    )}
                 </div>
 
                 <div className="icons-section">
-                    {localStorage.getItem('token') ? (
+                    {user ? (
                         <NavLink to="/profile" aria-label="Profile">
                             <button className="icon-btn" aria-label="User profile">
                                 <IoPerson />
@@ -60,11 +84,13 @@ function Navbar() {
                             </button>
                         </NavLink>
                     )}
-                    <NavLink to="/cart" aria-label="Shopping Cart" className="cart-link-desktop">
-                        <button className="icon-btn" aria-label="View cart">
-                            <FaShoppingCart />
-                        </button>
-                    </NavLink>
+                    {showCart && (
+                        <NavLink to="/cart" aria-label="Shopping Cart" className="cart-link-desktop">
+                            <button className="icon-btn" aria-label="View cart">
+                                <FaShoppingCart />
+                            </button>
+                        </NavLink>
+                    )}
 
                     <button
                         className="hamburger-btn"

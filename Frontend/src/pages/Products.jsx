@@ -5,7 +5,10 @@ import AddProduct from '../Components/AddProducts';
 import { motion, AnimatePresence } from 'framer-motion';
 import { API_VERSION_URL } from '../config';
 
+import { useAuth } from '../context/AuthContext';
+
 const Products = ({ cartItems, setCartItems }) => {
+    const { user } = useAuth();
     const [productList, setProductList] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [showForm, setShowForm] = useState(false);
@@ -14,8 +17,6 @@ const Products = ({ cartItems, setCartItems }) => {
 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-
-    const token = localStorage.getItem('token');
 
     useEffect(() => {
         const fetchProducts = async () => {
@@ -48,10 +49,10 @@ const Products = ({ cartItems, setCartItems }) => {
         fetchProducts();
 
         const fetchUserFavs = async () => {
-            if (token) {
+            if (user) {
                 try {
                     const res = await fetch(`${API_VERSION_URL}/user/profile`, {
-                        headers: { 'Authorization': `Bearer ${token}` }
+                        credentials: 'include'
                     });
                     const data = await res.json();
                     if (data.success && data.user) {
@@ -61,7 +62,7 @@ const Products = ({ cartItems, setCartItems }) => {
             }
         };
         fetchUserFavs();
-    }, [token]);
+    }, [user]);
 
     const handleAddToList = (product) => {
         const existingProductIndex = cartItems.findIndex(item => item._id === product._id);
@@ -88,10 +89,11 @@ const Products = ({ cartItems, setCartItems }) => {
             newFavs = [...favorites, product];
         }
         setFavorites(newFavs);
-        if (token) {
+        if (user) {
             fetch(`${API_VERSION_URL}/user/favorites`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({ favorites: newFavs })
             }).catch(console.error);
         }
@@ -209,7 +211,7 @@ const Products = ({ cartItems, setCartItems }) => {
                 </motion.div>
             </div>
 
-            {token && localStorage.getItem('role') === 'admin' && (
+            {user && (user.role === 'Admin' || user.role === 'admin') && (
                 <div>
                     <button
                         className="floating-add-btn"

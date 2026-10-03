@@ -1,8 +1,10 @@
 const crypto = require("crypto");
 const Razorpay = require("razorpay");
+const mongoose = require("mongoose");
 const Order = require("../models/Order");
 const User = require("../models/User");
 const Delivery = require("../models/Delivery");
+const File = require("../models/Files");
 
 require("dotenv").config();
 
@@ -31,30 +33,113 @@ const getRazorpayInstance = () => {
     });
 };
 
-// Helper to calculate totals securely on the backend
-const calculateOrderTotals = (items, clientDeliveryFee, clientTax) => {
-    const subtotal = items.reduce((sum, item) => {
-        const price = Number(item.price) || 0;
-        const qty = Number(item.quantity) || 1;
-        return sum + (price * qty);
-    }, 0);
-
-    // Free delivery over ₹300, else ₹40 (or respect client if 0)
-    let deliveryFee = subtotal >= 300 ? 0 : 40;
-    if (clientDeliveryFee !== undefined && clientDeliveryFee !== null) {
-        deliveryFee = Number(clientDeliveryFee) >= 0 ? Number(clientDeliveryFee) : deliveryFee;
+/**
+ * Authoritative Server-Side Pricing & Validation Helper
+ * Fetches product prices directly from MongoDB (File model).
+ * Validates quantity (positive integer <= 100).
+ * Calculates subtotal, delivery fee (free over ₹300, else ₹40), and 5% GST tax.
+ * Verifies address ownership against req.user.
+ */
+const calculateAuthoritativeTotals = async (rawItems, addressId, reqUser) => {
+    if (!rawItems || !Array.isArray(rawItems) || rawItems.length === 0) {
+        throw { statusCode: 400, message: "Order items cannot be empty" };
     }
+
+    let subtotal = 0;
+    const sanitizedItems = [];
+
+    for (const item of rawItems) {
+        const productId = item._id || item.id;
+        if (!productId || !mongoose.Types.ObjectId.isValid(productId)) {
+            throw { statusCode: 400, message: `Invalid product ID: ${productId}` };
+        }
+
+        const quantity = Number(item.quantity);
+        if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) {
+            throw { statusCode: 400, message: `Invalid quantity for product ${productId}. Must be a positive integer (max 100)` };
+        }
+
+        const product = await File.findById(productId);
+        if (!product) {
+            throw { statusCode: 404, message: `Product not found: ${productId}` };
+        }
+
+        const dbPrice = Number(product.price);
+        if (isNaN(dbPrice) || dbPrice < 0) {
+            throw { statusCode: 500, message: `Invalid product price configured` };
+        }
+
+        const itemSubtotal = dbPrice * quantity;
+        subtotal += itemSubtotal;
+
+        sanitizedItems.push({
+            _id: String(product._id),
+            iceName: product.iceName || product.name || "Ice Cream",
+            name: product.iceName || product.name || "Ice Cream",
+            price: dbPrice,
+            quantity: quantity,
+            iceUrl: product.iceUrl || "",
+            description: product.description || "",
+            tags: product.tags || ""
+        });
+    }
+
+    // Business Rules:
+    // Free delivery over ₹300, else ₹40
+    const deliveryFee = subtotal >= 300 || subtotal === 0 ? 0 : 40;
 
     // 5% GST tax rounded
-    let tax = Math.round(subtotal * 0.05);
-    if (clientTax !== undefined && clientTax !== null) {
-        tax = Number(clientTax) >= 0 ? Number(clientTax) : tax;
-    }
+    const tax = Math.round(subtotal * 0.05);
 
+    // Final Total
     const total = subtotal + deliveryFee + tax;
 
-    return { subtotal, deliveryFee, tax, total };
+    // Address Ownership Verification
+    let addressSnapshot = {};
+    let validAddressId = null;
+
+    if (addressId) {
+        if (!mongoose.Types.ObjectId.isValid(addressId)) {
+            throw { statusCode: 400, message: "Invalid address ID format" };
+        }
+
+        const deliveryDoc = await Delivery.findById(addressId);
+        if (!deliveryDoc) {
+            throw { statusCode: 404, message: "Delivery address not found" };
+        }
+
+        // Check ownership by userId or email
+        const isOwner =
+            (deliveryDoc.userId && String(deliveryDoc.userId) === String(reqUser.id)) ||
+            (deliveryDoc.email && reqUser.email && deliveryDoc.email.toLowerCase() === reqUser.email.toLowerCase());
+
+        if (!isOwner) {
+            throw { statusCode: 403, message: "Unauthorized address ID. Address does not belong to authenticated user." };
+        }
+
+        validAddressId = deliveryDoc._id;
+        addressSnapshot = {
+            name: deliveryDoc.name || "",
+            contact: deliveryDoc.contact || "",
+            streetAdd: deliveryDoc.streetAdd || "",
+            city: deliveryDoc.city || "",
+            pin: deliveryDoc.pin || "",
+            district: deliveryDoc.district || ""
+        };
+    }
+
+    return {
+        subtotal,
+        deliveryFee,
+        tax,
+        total,
+        sanitizedItems,
+        addressId: validAddressId,
+        addressSnapshot
+    };
 };
+
+exports.calculateAuthoritativeTotals = calculateAuthoritativeTotals;
 
 // Generate friendly order ID like FF-9B4F81-4821
 const generateOrderId = () => {
@@ -85,45 +170,85 @@ exports.createRazorpayOrder = async (req, res) => {
             return res.status(401).json({ success: false, message: "User not authenticated" });
         }
 
-        const { items, addressId, deliveryFee: reqDeliveryFee, tax: reqTax } = req.body;
+        const { items, addressId } = req.body;
 
-        if (!items || !Array.isArray(items) || items.length === 0) {
-            return res.status(400).json({ success: false, message: "Order items cannot be empty" });
-        }
-
-        // Calculate verified totals on backend
-        const { subtotal, deliveryFee, tax, total } = calculateOrderTotals(items, reqDeliveryFee, reqTax);
+        const {
+            subtotal,
+            deliveryFee,
+            tax,
+            total,
+            sanitizedItems,
+            addressId: validAddressId,
+            addressSnapshot
+        } = await calculateAuthoritativeTotals(items, addressId, req.user);
 
         const instance = getRazorpayInstance();
+        const razorpayAmountInPaise = Math.round(total * 100);
 
-        // If Razorpay credentials are not yet set up, return dummy simulator info
         if (!instance) {
+            // Dummy / Sandbox mode fallback
+            const dummyOrderId = `dummy_${Date.now()}`;
+
+            await Order.create({
+                orderId: generateOrderId(),
+                userId: req.user.id,
+                items: sanitizedItems,
+                subtotal,
+                deliveryFee,
+                tax,
+                total,
+                addressId: validAddressId,
+                deliveryAddress: addressSnapshot,
+                paymentMethod: "dummy",
+                paymentStatus: "pending",
+                razorpayOrderId: dummyOrderId,
+                orderStatus: "Placed"
+            });
+
             return res.status(200).json({
                 success: true,
                 isDummy: true,
-                orderId: `dummy_${Date.now()}`,
-                amount: Math.round(total * 100),
+                orderId: dummyOrderId,
+                amount: razorpayAmountInPaise,
                 currency: "INR",
                 subtotal,
                 deliveryFee,
                 tax,
                 total,
-                message: "Razorpay credentials not set; dummy payment mode active."
+                message: "Razorpay test keys not set; test simulator mode active."
             });
         }
 
-        // Razorpay expects amount in smallest currency subunit (paise for INR)
+        // Razorpay test order creation
         const options = {
-            amount: Math.round(total * 100),
+            amount: razorpayAmountInPaise,
             currency: "INR",
             receipt: `rcpt_${Date.now()}`.slice(0, 40),
             notes: {
                 userId: String(req.user.id),
-                userEmail: req.user.email || ""
+                userEmail: req.user.email || "",
+                expectedTotal: String(total)
             }
         };
 
         const razorpayOrder = await instance.orders.create(options);
+
+        // Pre-create order doc in DB to bind expected total & details
+        await Order.create({
+            orderId: generateOrderId(),
+            userId: req.user.id,
+            items: sanitizedItems,
+            subtotal,
+            deliveryFee,
+            tax,
+            total,
+            addressId: validAddressId,
+            deliveryAddress: addressSnapshot,
+            paymentMethod: "razorpay",
+            paymentStatus: "pending",
+            razorpayOrderId: razorpayOrder.id,
+            orderStatus: "Placed"
+        });
 
         return res.status(200).json({
             success: true,
@@ -138,25 +263,11 @@ exports.createRazorpayOrder = async (req, res) => {
             total
         });
     } catch (error) {
-        console.error("Create Razorpay order error:", error);
-        if (error.statusCode === 401 || error.error?.description === "Authentication failed") {
-            const { subtotal, deliveryFee, tax, total } = calculateOrderTotals(req.body.items || [], req.body.deliveryFee, req.body.tax);
-            return res.status(200).json({
-                success: true,
-                isDummy: true,
-                orderId: `dummy_${Date.now()}`,
-                amount: Math.round(total * 100),
-                currency: "INR",
-                subtotal,
-                deliveryFee,
-                tax,
-                total,
-                message: "Razorpay credentials unauthorized or expired. Switched to Test Simulator mode."
-            });
-        }
-        return res.status(500).json({
+        console.error("Create Razorpay order error:", error.message || error);
+        const status = error.statusCode || 500;
+        return res.status(status).json({
             success: false,
-            message: error.error?.description || error.message || "Failed to initialize payment"
+            message: error.message || "Failed to initialize payment"
         });
     }
 };
@@ -174,14 +285,8 @@ exports.verifyPayment = async (req, res) => {
             razorpay_signature,
             items,
             addressId,
-            isDummy,
-            deliveryFee: reqDeliveryFee,
-            tax: reqTax
+            isDummy
         } = req.body;
-
-        if (!items || !Array.isArray(items) || items.length === 0) {
-            return res.status(400).json({ success: false, message: "Order items cannot be empty" });
-        }
 
         // Signature verification (unless explicit dummy simulation)
         if (!isDummy) {
@@ -204,77 +309,67 @@ exports.verifyPayment = async (req, res) => {
             }
         }
 
-        // Fetch address snapshot if available
-        let addressSnapshot = {};
-        if (addressId) {
-            try {
-                const deliveryDoc = await Delivery.findById(addressId);
-                if (deliveryDoc) {
-                    addressSnapshot = {
-                        name: deliveryDoc.name,
-                        contact: deliveryDoc.contact,
-                        streetAdd: deliveryDoc.streetAdd,
-                        city: deliveryDoc.city,
-                        pin: deliveryDoc.pin,
-                        district: deliveryDoc.district
-                    };
-                }
-            } catch (e) {
-                console.warn("Could not fetch delivery doc snapshot:", e.message);
-            }
+        // Look for pre-created pending Order for this razorpay_order_id
+        let orderDoc = null;
+        if (razorpay_order_id) {
+            orderDoc = await Order.findOne({ razorpayOrderId: razorpay_order_id, userId: req.user.id });
         }
 
-        // Calculate verified totals
-        const { subtotal, deliveryFee, tax, total } = calculateOrderTotals(items, reqDeliveryFee, reqTax);
-        const orderId = generateOrderId();
+        if (orderDoc) {
+            // Pre-created order found: mark as paid
+            orderDoc.paymentStatus = "paid";
+            orderDoc.paymentId = razorpay_payment_id || `DUMMY_PAY_${Date.now()}`;
+            orderDoc.razorpaySignature = razorpay_signature || null;
+            await orderDoc.save();
+        } else {
+            // Fallback: calculate authoritative totals
+            const {
+                subtotal,
+                deliveryFee,
+                tax,
+                total,
+                sanitizedItems,
+                addressId: validAddressId,
+                addressSnapshot
+            } = await calculateAuthoritativeTotals(items, addressId, req.user);
 
-        // Format items
-        const sanitizedItems = items.map(item => ({
-            _id: String(item._id || ""),
-            iceName: item.iceName || item.name || "Ice Cream",
-            name: item.name || item.iceName || "Ice Cream",
-            price: Number(item.price) || 0,
-            quantity: Number(item.quantity) || 1,
-            iceUrl: item.iceUrl || "",
-            description: item.description || "",
-            tags: item.tags || item.tag || ""
-        }));
+            const orderId = generateOrderId();
+            orderDoc = await Order.create({
+                orderId,
+                userId: req.user.id,
+                items: sanitizedItems,
+                subtotal,
+                deliveryFee,
+                tax,
+                total,
+                addressId: validAddressId,
+                deliveryAddress: addressSnapshot,
+                paymentMethod: isDummy ? "dummy" : "razorpay",
+                paymentStatus: "paid",
+                paymentId: razorpay_payment_id || `DUMMY_PAY_${Date.now()}`,
+                razorpayOrderId: razorpay_order_id || null,
+                razorpaySignature: razorpay_signature || null,
+                orderStatus: "Placed"
+            });
+        }
 
-        // 1. Create permanent Order record
-        const newOrder = await Order.create({
-            orderId,
-            userId: req.user.id,
-            items: sanitizedItems,
-            subtotal,
-            deliveryFee,
-            tax,
-            total,
-            addressId: addressId || null,
-            deliveryAddress: addressSnapshot,
-            paymentMethod: isDummy ? "dummy" : "razorpay",
-            paymentStatus: "paid",
-            paymentId: razorpay_payment_id || `DUMMY_PAY_${Date.now()}`,
-            razorpayOrderId: razorpay_order_id || null,
-            razorpaySignature: razorpay_signature || null,
-            orderStatus: "Placed"
-        });
-
-        // 2. Synchronize to user.recentOrders for backward-compatibility with Profile & Cart
+        // Sync to user.recentOrders
         const user = await User.findById(req.user.id);
         if (user) {
+            user.recentOrders = user.recentOrders.filter(o => o.orderId !== orderDoc.orderId);
             user.recentOrders.unshift({
-                orderId: newOrder.orderId,
-                date: newOrder.createdAt,
-                items: newOrder.items,
-                total: newOrder.total,
-                subtotal: newOrder.subtotal,
-                deliveryFee: newOrder.deliveryFee,
-                tax: newOrder.tax,
-                addressId: newOrder.addressId,
-                deliveryAddress: newOrder.deliveryAddress,
-                paymentMethod: newOrder.paymentMethod,
+                orderId: orderDoc.orderId,
+                date: orderDoc.createdAt,
+                items: orderDoc.items,
+                total: orderDoc.total,
+                subtotal: orderDoc.subtotal,
+                deliveryFee: orderDoc.deliveryFee,
+                tax: orderDoc.tax,
+                addressId: orderDoc.addressId,
+                deliveryAddress: orderDoc.deliveryAddress,
+                paymentMethod: orderDoc.paymentMethod,
                 paymentStatus: "paid",
-                paymentId: newOrder.paymentId,
+                paymentId: orderDoc.paymentId,
                 status: "Placed"
             });
             if (user.recentOrders.length > 20) {
@@ -287,11 +382,12 @@ exports.verifyPayment = async (req, res) => {
         return res.status(201).json({
             success: true,
             message: "Payment verified and order confirmed successfully",
-            order: newOrder
+            order: orderDoc
         });
     } catch (error) {
-        console.error("Verify payment error:", error);
-        return res.status(500).json({ success: false, message: "Payment verification failed" });
+        console.error("Verify payment error:", error.message || error);
+        const status = error.statusCode || 500;
+        return res.status(status).json({ success: false, message: error.message || "Payment verification failed" });
     }
 };
 
@@ -302,48 +398,20 @@ exports.createCodOrder = async (req, res) => {
             return res.status(401).json({ success: false, message: "User not authenticated" });
         }
 
-        const { items, addressId, deliveryFee: reqDeliveryFee, tax: reqTax } = req.body;
+        const { items, addressId } = req.body;
 
-        if (!items || !Array.isArray(items) || items.length === 0) {
-            return res.status(400).json({ success: false, message: "Order items cannot be empty" });
-        }
+        const {
+            subtotal,
+            deliveryFee,
+            tax,
+            total,
+            sanitizedItems,
+            addressId: validAddressId,
+            addressSnapshot
+        } = await calculateAuthoritativeTotals(items, addressId, req.user);
 
-        // Fetch address snapshot
-        let addressSnapshot = {};
-        if (addressId) {
-            try {
-                const deliveryDoc = await Delivery.findById(addressId);
-                if (deliveryDoc) {
-                    addressSnapshot = {
-                        name: deliveryDoc.name,
-                        contact: deliveryDoc.contact,
-                        streetAdd: deliveryDoc.streetAdd,
-                        city: deliveryDoc.city,
-                        pin: deliveryDoc.pin,
-                        district: deliveryDoc.district
-                    };
-                }
-            } catch (e) {
-                console.warn("Could not fetch delivery doc snapshot:", e.message);
-            }
-        }
-
-        // Calculate verified totals
-        const { subtotal, deliveryFee, tax, total } = calculateOrderTotals(items, reqDeliveryFee, reqTax);
         const orderId = generateOrderId();
 
-        const sanitizedItems = items.map(item => ({
-            _id: String(item._id || ""),
-            iceName: item.iceName || item.name || "Ice Cream",
-            name: item.name || item.iceName || "Ice Cream",
-            price: Number(item.price) || 0,
-            quantity: Number(item.quantity) || 1,
-            iceUrl: item.iceUrl || "",
-            description: item.description || "",
-            tags: item.tags || item.tag || ""
-        }));
-
-        // 1. Create Order record
         const newOrder = await Order.create({
             orderId,
             userId: req.user.id,
@@ -352,7 +420,7 @@ exports.createCodOrder = async (req, res) => {
             deliveryFee,
             tax,
             total,
-            addressId: addressId || null,
+            addressId: validAddressId,
             deliveryAddress: addressSnapshot,
             paymentMethod: "cod",
             paymentStatus: "pending",
@@ -362,7 +430,7 @@ exports.createCodOrder = async (req, res) => {
             orderStatus: "Placed"
         });
 
-        // 2. Synchronize to user.recentOrders
+        // Sync to user.recentOrders
         const user = await User.findById(req.user.id);
         if (user) {
             user.recentOrders.unshift({
@@ -393,8 +461,9 @@ exports.createCodOrder = async (req, res) => {
             order: newOrder
         });
     } catch (error) {
-        console.error("Create COD order error:", error);
-        return res.status(500).json({ success: false, message: "Failed to place COD order" });
+        console.error("Create COD order error:", error.message || error);
+        const status = error.statusCode || 500;
+        return res.status(status).json({ success: false, message: error.message || "Failed to place COD order" });
     }
 };
 
@@ -408,7 +477,6 @@ exports.getOrderById = async (req, res) => {
 
         const order = await Order.findOne({ orderId });
         if (!order) {
-            // Check in user's recentOrders as fallback
             if (req.user && req.user.id) {
                 const user = await User.findById(req.user.id);
                 const recentOrder = (user?.recentOrders || []).find(o => o.orderId === orderId);
@@ -419,7 +487,6 @@ exports.getOrderById = async (req, res) => {
             return res.status(404).json({ success: false, message: "Order not found" });
         }
 
-        // Verify authorization: only the order owner or Admin can view
         if (req.user && req.user.role !== "Admin" && String(order.userId) !== String(req.user.id)) {
             return res.status(403).json({ success: false, message: "Unauthorized to view this order" });
         }
@@ -430,3 +497,4 @@ exports.getOrderById = async (req, res) => {
         return res.status(500).json({ success: false, message: "Failed to retrieve order" });
     }
 };
+

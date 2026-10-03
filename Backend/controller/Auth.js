@@ -5,50 +5,55 @@ const { randomUUID } = require("crypto");
 
 require("dotenv").config();
 
-// ─── Token Helper ────────────────────────────────────────────────────────────
-const extractToken = (req) => {
-    if (req.headers.authorization && req.headers.authorization.startsWith("Bearer ")) {
-        return req.headers.authorization.split(" ")[1];
-    }
-    if (req.cookies && req.cookies.token) {
-        return req.cookies.token;
-    }
-    return null;
-};
-
-const verifyToken = (token) => jwt.verify(token, process.env.JWT_SECRET);
-
 // ─── Signup ───────────────────────────────────────────────────────────────────
 exports.signup = async (req, res) => {
     try {
-        const { name, email, password, role, adminCode, phone } = req.body;
+        const { name, email, password } = req.body;
 
-        if (role === "Admin") {
-            if (!adminCode || adminCode !== process.env.ADMIN_CODE) {
-                return res.status(400).json({ success: false, message: "Invalid admin code" });
-            }
-            if (!phone) {
-                return res.status(400).json({ success: false, message: "Phone number required for admin" });
-            }
+        // 1. Validate required fields & non-empty content
+        if (!name || typeof name !== "string" || name.trim() === "") {
+            return res.status(400).json({ success: false, message: "Name is required" });
         }
 
-        const existingEmail = await User.findOne({ email: email.trim().toLowerCase() });
+        if (!email || typeof email !== "string" || email.trim() === "") {
+            return res.status(400).json({ success: false, message: "Email is required" });
+        }
+
+        // Normalize email: trim + lowercase
+        const normalizedEmail = email.trim().toLowerCase();
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(normalizedEmail)) {
+            return res.status(400).json({ success: false, message: "Please provide a valid email address" });
+        }
+
+        if (!password || typeof password !== "string" || password.length < 6) {
+            return res.status(400).json({ success: false, message: "Password must be at least 6 characters long" });
+        }
+
+        // 2. Application-level duplicate check
+        const existingEmail = await User.findOne({ email: normalizedEmail });
         if (existingEmail) {
-            return res.status(400).json({ success: false, message: "User already exists" });
+            return res.status(400).json({ success: false, message: "Email already registered" });
         }
 
+        // 3. Hash password with bcrypt
         const hashedPassword = await bcrypt.hash(password, 10);
 
+        // 4. Create regular customer user in MongoDB
         await User.create({
-            name,
-            email: email.trim().toLowerCase(),
+            name: name.trim(),
+            email: normalizedEmail,
             password: hashedPassword,
-            role,
-            ...(phone && { phone })
+            role: "Customer"
         });
 
         return res.status(201).json({ success: true, message: "User created successfully" });
     } catch (error) {
+        // Handle MongoDB duplicate key error (code 11000) for race conditions
+        if (error.code === 11000 || (error.message && error.message.includes("E11000"))) {
+            return res.status(400).json({ success: false, message: "Email already registered" });
+        }
+
         console.error("Signup error:", error);
         return res.status(500).json({ success: false, message: "User cannot be registered. Please try later" });
     }
@@ -86,7 +91,6 @@ exports.login = async (req, res) => {
         return res.status(200).json({
             success: true,
             message: "Logged in successfully",
-            token,
             user
         });
     } catch (error) {
@@ -95,14 +99,29 @@ exports.login = async (req, res) => {
     }
 };
 
+// ─── Logout ───────────────────────────────────────────────────────────────────
+exports.logout = async (req, res) => {
+    try {
+        res.clearCookie("token", {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "lax"
+        });
+        return res.status(200).json({
+            success: true,
+            message: "Logged out successfully"
+        });
+    } catch (error) {
+        console.error("Logout error:", error);
+        return res.status(500).json({ success: false, message: "Logout failed" });
+    }
+};
+
 // ─── Get Profile ──────────────────────────────────────────────────────────────
 exports.profile = async (req, res) => {
     try {
-        const token = extractToken(req);
-        if (!token) return res.status(401).json({ success: false, message: "No token provided" });
-
-        const decoded = verifyToken(token);
-        const user = await User.findById(decoded.id).select("-password -__v");
+        const userId = req.user.id;
+        const user = await User.findById(userId).select("-password -__v");
 
         if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
@@ -120,9 +139,6 @@ exports.profile = async (req, res) => {
         });
     } catch (error) {
         console.error("Profile error:", error);
-        if (error.name === "JsonWebTokenError" || error.name === "TokenExpiredError") {
-            return res.status(401).json({ success: false, message: "Invalid or expired token" });
-        }
         res.status(500).json({ success: false, message: "Server error" });
     }
 };
@@ -130,23 +146,20 @@ exports.profile = async (req, res) => {
 // ─── Update Profile ───────────────────────────────────────────────────────────
 exports.updateProfile = async (req, res) => {
     try {
-        const token = extractToken(req);
-        if (!token) return res.status(401).json({ success: false, message: "No token provided" });
-
-        const decoded = verifyToken(token);
+        const userId = req.user.id;
         const { name, email } = req.body;
 
         if (!name || !email) {
             return res.status(400).json({ success: false, message: "Name and email are required" });
         }
 
-        const existingEmail = await User.findOne({ email: email.toLowerCase(), _id: { $ne: decoded.id } });
+        const existingEmail = await User.findOne({ email: email.toLowerCase(), _id: { $ne: userId } });
         if (existingEmail) {
             return res.status(400).json({ success: false, message: "Email already in use by another account" });
         }
 
         const updatedUser = await User.findByIdAndUpdate(
-            decoded.id,
+            userId,
             { name, email: email.toLowerCase() },
             { new: true, runValidators: true }
         ).select("-password -__v");
@@ -166,9 +179,6 @@ exports.updateProfile = async (req, res) => {
         });
     } catch (error) {
         console.error("Update profile error:", error);
-        if (error.name === "JsonWebTokenError" || error.name === "TokenExpiredError") {
-            return res.status(401).json({ success: false, message: "Invalid or expired token" });
-        }
         res.status(500).json({ success: false, message: "Server error" });
     }
 };
@@ -176,10 +186,7 @@ exports.updateProfile = async (req, res) => {
 // ─── Toggle / Sync Favorites ──────────────────────────────────────────────────
 exports.updateFavorites = async (req, res) => {
     try {
-        const token = extractToken(req);
-        if (!token) return res.status(401).json({ success: false, message: "No token provided" });
-
-        const decoded = verifyToken(token);
+        const userId = req.user.id;
         const { favorites } = req.body;
 
         if (!Array.isArray(favorites)) {
@@ -198,7 +205,7 @@ exports.updateFavorites = async (req, res) => {
         }));
 
         const updatedUser = await User.findByIdAndUpdate(
-            decoded.id,
+            userId,
             { $set: { favorites: normalizedFavs } },
             { new: true }
         ).select("favorites");
@@ -208,9 +215,6 @@ exports.updateFavorites = async (req, res) => {
         res.json({ success: true, message: "Favorites updated", favorites: updatedUser.favorites });
     } catch (error) {
         console.error("Update favorites error:", error);
-        if (error.name === "JsonWebTokenError" || error.name === "TokenExpiredError") {
-            return res.status(401).json({ success: false, message: "Invalid or expired token" });
-        }
         res.status(500).json({ success: false, message: "Server error" });
     }
 };
@@ -218,39 +222,34 @@ exports.updateFavorites = async (req, res) => {
 // ─── Add a Single Order (push, max 20) ───────────────────────────────────────
 exports.addOrder = async (req, res) => {
     try {
-        const token = extractToken(req);
-        if (!token) return res.status(401).json({ success: false, message: "No token provided" });
+        const { calculateAuthoritativeTotals } = require("./payment");
+        const { items, addressId } = req.body;
 
-        const decoded = verifyToken(token);
-        const { items, total, addressId } = req.body;
-
-        if (!items || !Array.isArray(items) || items.length === 0) {
-            return res.status(400).json({ success: false, message: "Order items are required" });
-        }
-        if (total === undefined || total === null) {
-            return res.status(400).json({ success: false, message: "Order total is required" });
-        }
+        const {
+            subtotal,
+            deliveryFee,
+            tax,
+            total,
+            sanitizedItems,
+            addressId: validAddressId,
+            addressSnapshot
+        } = await calculateAuthoritativeTotals(items, addressId, req.user);
 
         const newOrder = {
             orderId: randomUUID(),
             date: new Date(),
-            items: items.map(item => ({
-                _id: String(item._id),
-                iceName: item.iceName || item.name || "",
-                name: item.name || item.iceName || "",
-                price: Number(item.price) || 0,
-                quantity: Number(item.quantity) || 1,
-                iceUrl: item.iceUrl || "",
-                description: item.description || "",
-                tags: item.tags || item.tag || "",
-            })),
-            total: Number(total),
-            addressId: addressId || null,
+            items: sanitizedItems,
+            subtotal,
+            deliveryFee,
+            tax,
+            total,
+            addressId: validAddressId,
+            deliveryAddress: addressSnapshot,
             status: "Placed"
         };
 
         // Push new order to front, keep max 20 orders
-        const user = await User.findById(decoded.id);
+        const user = await User.findById(req.user.id);
         if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
         user.recentOrders.unshift(newOrder);
@@ -267,31 +266,23 @@ exports.addOrder = async (req, res) => {
             recentOrders: user.recentOrders
         });
     } catch (error) {
-        console.error("Add order error:", error);
-        if (error.name === "JsonWebTokenError" || error.name === "TokenExpiredError") {
-            return res.status(401).json({ success: false, message: "Invalid or expired token" });
-        }
-        res.status(500).json({ success: false, message: "Server error" });
+        console.error("Add order error:", error.message || error);
+        const status = error.statusCode || 500;
+        res.status(status).json({ success: false, message: error.message || "Server error" });
     }
 };
 
 // ─── Get Recent Orders ────────────────────────────────────────────────────────
 exports.getOrders = async (req, res) => {
     try {
-        const token = extractToken(req);
-        if (!token) return res.status(401).json({ success: false, message: "No token provided" });
-
-        const decoded = verifyToken(token);
-        const user = await User.findById(decoded.id).select("recentOrders");
+        const userId = req.user.id;
+        const user = await User.findById(userId).select("recentOrders");
 
         if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
         res.json({ success: true, recentOrders: user.recentOrders || [] });
     } catch (error) {
         console.error("Get orders error:", error);
-        if (error.name === "JsonWebTokenError" || error.name === "TokenExpiredError") {
-            return res.status(401).json({ success: false, message: "Invalid or expired token" });
-        }
         res.status(500).json({ success: false, message: "Server error" });
     }
 };
@@ -299,10 +290,7 @@ exports.getOrders = async (req, res) => {
 // ─── Legacy: Full recentOrders replace (kept for compat) ─────────────────────
 exports.updateRecentOrders = async (req, res) => {
     try {
-        const token = extractToken(req);
-        if (!token) return res.status(401).json({ success: false, message: "No token provided" });
-
-        const decoded = verifyToken(token);
+        const userId = req.user.id;
         const { recentOrders } = req.body;
 
         if (!Array.isArray(recentOrders)) {
@@ -310,7 +298,7 @@ exports.updateRecentOrders = async (req, res) => {
         }
 
         const updatedUser = await User.findByIdAndUpdate(
-            decoded.id,
+            userId,
             { $set: { recentOrders } },
             { new: true }
         ).select("recentOrders");

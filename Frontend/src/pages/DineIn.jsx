@@ -4,67 +4,104 @@ import ShopLocationMap from "../Components/ShopLocationMap";
 import './DineIn.css';
 import { motion, AnimatePresence } from 'framer-motion';
 import { API_VERSION_URL } from '../config';
-import { getShopCoordinates } from '../data/shopCoordinates';
 
 const DineIn = () => {
     const [dineinList, setDineinList] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [location, setLocation] = useState('');
+    const [searchError, setSearchError] = useState(null);
+    const [locationInput, setLocationInput] = useState('');
     const [selectedShop, setSelectedShop] = useState(null);
+    const [customerLocation, setCustomerLocation] = useState(null);
+
+    const fetchAllShops = async () => {
+        try {
+            setLoading(true);
+            setError(null);
+            setSearchError(null);
+            const response = await fetch(`${API_VERSION_URL}/shop`);
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+
+            const responseData = await response.json();
+
+            if (responseData.success) {
+                const shops = responseData.data || [];
+                setDineinList(shops);
+                setCustomerLocation(null);
+                if (shops.length > 0) {
+                    const firstWithCoords = shops.find(s => s.latitude != null && s.longitude != null) || shops[0];
+                    setSelectedShop(firstWithCoords);
+                }
+            } else {
+                throw new Error(responseData.message || 'Failed to fetch shops');
+            }
+
+        } catch (err) {
+            console.error("Error fetching shops:", err);
+            setError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     useEffect(() => {
-        const fetchDinein = async () => {
-            try {
-                setLoading(true);
-                setError(null);
-                const response = await fetch(`${API_VERSION_URL}/shop`);
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! Status: ${response.status}`);
-                }
-
-                const responseData = await response.json();
-
-                if (responseData.success) {
-                    setDineinList(responseData.data || []);
-                } else {
-                    throw new Error(responseData.message || 'Failed to fetch shops');
-                }
-
-            } catch (error) {
-                console.error("Error fetching Dine in:", error);
-                setError(error.message);
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchDinein();
+        fetchAllShops();
     }, []);
 
-    /**
-     * Enriches a shop object with coordinates from the frontend lookup,
-     * then sets it as the selected shop to show on the map.
-     */
     const handleSelectShop = (shop) => {
-        const coords = getShopCoordinates(shop.shopName);
-        const enrichedShop = { ...shop, ...coords };
-        console.log('Selected shop:', enrichedShop.shopName, `(${enrichedShop.latitude}, ${enrichedShop.longitude})`);
-        setSelectedShop(enrichedShop);
+        // Use latitude and longitude directly from shop object (no hardcoded fallback)
+        const lat = shop.latitude != null ? Number(shop.latitude) : null;
+        const lng = shop.longitude != null ? Number(shop.longitude) : null;
+        const selected = { ...shop, latitude: lat, longitude: lng };
+        setSelectedShop(selected);
     };
 
-    const handleSearch = (e) => {
+    const handleSearchSubmit = async (e) => {
         e.preventDefault();
-        console.log('Searching for shops near:', location);
+        if (!locationInput || !locationInput.trim()) {
+            fetchAllShops();
+            return;
+        }
+
+        try {
+            setLoading(true);
+            setError(null);
+            setSearchError(null);
+
+            const query = encodeURIComponent(locationInput.trim());
+            const response = await fetch(`${API_VERSION_URL}/shop?location=${query}`);
+            const responseData = await response.json();
+
+            if (!response.ok) {
+                throw new Error(responseData.message || "Location could not be found. Please enter a more specific location.");
+            }
+
+            if (responseData.success) {
+                const shops = responseData.data || [];
+                setDineinList(shops);
+                setCustomerLocation(responseData.customerLocation || null);
+
+                if (shops.length > 0) {
+                    setSelectedShop(shops[0]);
+                } else {
+                    setSelectedShop(null);
+                }
+            }
+        } catch (err) {
+            console.error("Customer location search error:", err);
+            setSearchError(err.message || "Location could not be found. Please enter a more specific location.");
+            setDineinList([]);
+            setSelectedShop(null);
+            setCustomerLocation(null);
+        } finally {
+            setLoading(false);
+        }
     };
 
-    const filteredDineinList = dineinList.filter(shop =>
-        (shop.location && shop.location.toLowerCase().includes(location.toLowerCase())) ||
-        (shop.shopName && shop.shopName.toLowerCase().includes(location.toLowerCase()))
-    );
-
-    if (loading) {
+    if (loading && dineinList.length === 0 && !searchError) {
         return (
             <div className="dinein-container">
                 <div className="loading-container">
@@ -81,7 +118,7 @@ const DineIn = () => {
                 <div className="loading-container" style={{ color: '#ff5252' }}>
                     <p>⚠️ Error: {error}</p>
                     <button 
-                        onClick={() => window.location.reload()}
+                        onClick={fetchAllShops}
                         style={{ marginTop: '20px', padding: '10px 24px', borderRadius: '50px', background: '#ff5252', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}
                     >
                         Retry
@@ -103,35 +140,39 @@ const DineIn = () => {
                 <span className="hero-badge">Dine-In Experience</span>
                 <h1>Find Your Nearest Store</h1>
                 <p className="hero-subtitle">
-                    Visit our luxurious parlors to enjoy freshly scooped artisanal ice creams in a premium, welcoming atmosphere.
+                    Enter your city or area to find luxurious artisanal parlors nearest to you.
                 </p>
                 
-                <form className="location-search" onSubmit={handleSearch}>
-                    <div className="search-wrapper">
+                <form className="location-search" onSubmit={handleSearchSubmit}>
+                    <div className="search-wrapper" style={{ display: 'flex', gap: '8px', maxWidth: '540px', margin: '0 auto' }}>
                         <input
                             type="text"
-                            placeholder="Enter your city or area..."
-                            value={location}
-                            onChange={(e) => setLocation(e.target.value)}
+                            placeholder="Enter city, landmark or area (e.g. Pune, Bandra Mumbai)..."
+                            value={locationInput}
+                            onChange={(e) => setLocationInput(e.target.value)}
                             className="location-input"
+                            style={{ flex: 1 }}
                         />
-                        {/* <button type="submit" className="search-button-new">
-                            🔍
-                        </button> */}
+                        <button type="submit" className="search-button-new" style={{ padding: '0 20px', cursor: 'pointer', borderRadius: '50px' }} aria-label="Search location">
+                            🔍 Search
+                        </button>
                     </div>
                 </form>
+
+                {searchError && (
+                    <div className="search-error-banner" style={{ marginTop: '16px', color: '#ff5252', fontWeight: 600 }}>
+                        ⚠️ {searchError}
+                    </div>
+                )}
             </motion.div>
 
             {/* ── Main Content: Cards + Map ─────────────────────────────── */}
             <div className="dinein-content">
                 {/* ── Shop Cards ──────────────────────────────────────── */}
                 <div className="shops-container">
-                    <motion.div 
-                        className="shops-grid"
-                        layout
-                    >
+                    <motion.div className="shops-grid" layout>
                         <AnimatePresence>
-                            {filteredDineinList.length === 0 ? (
+                            {dineinList.length === 0 ? (
                                 <motion.div 
                                     className="empty-shops"
                                     initial={{ opacity: 0 }}
@@ -139,10 +180,16 @@ const DineIn = () => {
                                     exit={{ opacity: 0 }}
                                 >
                                     <span className="empty-icon">📍</span>
-                                    <p>We couldn't find any parlors matching your search. Try another location.</p>
+                                    <p>{searchError || "No parlors found near this location. Try searching another area."}</p>
+                                    <button 
+                                        onClick={fetchAllShops}
+                                        style={{ marginTop: '12px', padding: '8px 18px', borderRadius: '20px', background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', cursor: 'pointer' }}
+                                    >
+                                        Show All Parlors
+                                    </button>
                                 </motion.div>
                             ) : (
-                                filteredDineinList.map((shop, index) => (
+                                dineinList.map((shop, index) => (
                                     <motion.div
                                         key={shop._id || shop.id || index}
                                         layout
@@ -156,6 +203,7 @@ const DineIn = () => {
                                             shopImageUrl={shop.shopImageUrl}
                                             location={shop.location}
                                             rating={shop.rating || 0}
+                                            distanceKm={shop.distanceKm}
                                             onSelectShop={() => handleSelectShop(shop)}
                                             isSelected={
                                                 selectedShop &&
@@ -173,7 +221,7 @@ const DineIn = () => {
 
                 {/* ── Map Panel ────────────────────────────────────────── */}
                 <div className="dinein-map-panel">
-                    <ShopLocationMap shop={selectedShop} />
+                    <ShopLocationMap shop={selectedShop} customerLocation={customerLocation} />
                 </div>
             </div>
         </div>
