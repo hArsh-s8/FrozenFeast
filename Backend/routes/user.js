@@ -60,6 +60,7 @@ router.post("/login", validate(loginSchema), login);
 router.post("/logout", logout);
 router.post("/signup", validate(signupSchema), signup);
 router.get("/auth/google", googleAuthInit);
+router.get("/auth/google/init", googleAuthInit);
 router.get("/auth/google/callback", googleAuthCallback);
 
 // ─── Profile & User Identification Routes (protected) ─────────────────────────

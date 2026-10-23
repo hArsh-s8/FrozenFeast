@@ -12,16 +12,88 @@ const getCallbackUrl = () => {
     );
 };
 
+// Helper to generate a cryptographically signed CSRF state with 10-minute expiry
+const generateOAuthState = () => {
+    const nonce = crypto.randomBytes(16).toString("hex");
+    const timestamp = Date.now();
+    const secret = process.env.JWT_SECRET || "frozenfeast_oauth_secret_fallback";
+    const signature = crypto
+        .createHmac("sha256", secret)
+        .update(`${nonce}:${timestamp}`)
+        .digest("hex");
+    return `${nonce}.${timestamp}.${signature}`;
+};
+
+// Helper to verify CSRF state token and cookie
+const verifyOAuthState = (state, storedState) => {
+    if (!state || typeof state !== "string") return false;
+
+    // Check dual-layer cookie match if cookie is present
+    if (storedState && storedState !== state) {
+        console.error("OAuth state cookie mismatch");
+        return false;
+    }
+
+    const parts = state.split(".");
+    if (parts.length === 3) {
+        const [nonce, timestampStr, signature] = parts;
+        const timestamp = parseInt(timestampStr, 10);
+        const now = Date.now();
+        const tenMinutes = 10 * 60 * 1000;
+
+        // Check expiry (10 minutes) + clock drift allowance (60 seconds)
+        if (isNaN(timestamp) || now - timestamp > tenMinutes || timestamp > now + 60000) {
+            console.error("OAuth state expired or has invalid timestamp");
+            return false;
+        }
+
+        // Verify HMAC signature
+        const secret = process.env.JWT_SECRET || "frozenfeast_oauth_secret_fallback";
+        const expectedSignature = crypto
+            .createHmac("sha256", secret)
+            .update(`${nonce}:${timestamp}`)
+            .digest("hex");
+
+        try {
+            const signatureBuffer = Buffer.from(signature, "hex");
+            const expectedBuffer = Buffer.from(expectedSignature, "hex");
+
+            if (signatureBuffer.length !== expectedBuffer.length) {
+                return false;
+            }
+
+            return crypto.timingSafeEqual(signatureBuffer, expectedBuffer);
+        } catch (e) {
+            console.error("Error verifying OAuth signature:", e);
+            return false;
+        }
+    }
+
+    // Fallback: If legacy random hex string without dots, match directly against stored cookie
+    if (storedState && storedState === state) {
+        return true;
+    }
+
+    return false;
+};
+
 // ─── 1. Initiate Google OAuth Flow ───────────────────────────────────────────
 exports.googleAuthInit = (req, res) => {
+    const wantsJson =
+        req.query.format === "json" ||
+        req.xhr ||
+        (req.headers.accept && req.headers.accept.includes("application/json")) ||
+        req.path.endsWith("/init") ||
+        req.path.endsWith("/url");
+
     try {
         const clientId = process.env.GOOGLE_CLIENT_ID;
         if (!clientId || clientId.includes("your_google_client_id")) {
             console.warn("Google OAuth warning: GOOGLE_CLIENT_ID environment variable is missing or placeholder.");
         }
 
-        // Generate CSRF state
-        const state = crypto.randomBytes(16).toString("hex");
+        // Generate cryptographically signed CSRF state
+        const state = generateOAuthState();
 
         // Store state in HTTP-only short-lived cookie (10 minutes)
         const isProduction = process.env.NODE_ENV === "production";
@@ -44,9 +116,24 @@ exports.googleAuthInit = (req, res) => {
                 prompt: "select_account"
             }).toString();
 
+        if (wantsJson) {
+            return res.json({
+                success: true,
+                url: googleAuthUrl
+            });
+        }
+
         return res.redirect(googleAuthUrl);
     } catch (error) {
         console.error("Google Auth Init Error:", error);
+
+        if (wantsJson) {
+            return res.status(500).json({
+                success: false,
+                message: "Failed to initialize Google OAuth"
+            });
+        }
+
         const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
         return res.redirect(`${frontendUrl}/login?error=oauth_init_failed`);
     }
@@ -73,7 +160,7 @@ exports.googleAuthCallback = async (req, res) => {
         }
 
         // Verify CSRF state
-        if (!state || !storedState || state !== storedState) {
+        if (!verifyOAuthState(state, storedState)) {
             console.error("OAuth state CSRF mismatch!");
             return res.redirect(`${frontendUrl}/login?error=csrf_state_mismatch`);
         }
